@@ -1,6 +1,7 @@
+import os
 import psycopg2
 from psycopg2 import sql
-import os
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from zeep import Client
 
@@ -10,7 +11,7 @@ load_dotenv()
 # Konfigurace databáze z .env souboru
 DB_NAME = os.getenv("DB_NAME", "isds_db")
 DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "")  # Bezpečné načítání hesla
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
@@ -18,15 +19,14 @@ DB_PORT = os.getenv("DB_PORT", "5432")
 SIMULATE_API = True
 WSDL_URL = "https://ws1.mojedatovaschranka.cz/DS/DsManage"
 
-# Připojení k ISDS API (Simulace)
 if not SIMULATE_API:
     client = Client(WSDL_URL)
     print("✅ Připojeno k API ISDS")
 else:
     print("⚠️ Simulace API ISDS – certifikát zatím není dostupný.")
 
+# Připojení k databázi
 def connect_db():
-    """Připojení k databázi PostgreSQL"""
     try:
         conn = psycopg2.connect(
             dbname=DB_NAME, 
@@ -37,11 +37,11 @@ def connect_db():
         )
         return conn
     except Exception as e:
-        print("Chyba při připojení k databázi:", e)
+        print("❌ Chyba při připojení k databázi:", e)
         return None
 
+# Vytvoření tabulky zpráv
 def create_tables():
-    """Vytvoření tabulek v databázi pokud neexistují"""
     conn = connect_db()
     if conn:
         try:
@@ -65,8 +65,8 @@ def create_tables():
         except Exception as e:
             print("❌ Chyba při vytváření tabulek:", e)
 
+# Vložení zprávy
 def insert_message(message_id, datova_schranka_id, sender, subject, content, attachments):
-    """Vložení zprávy do databáze"""
     conn = connect_db()
     if conn:
         try:
@@ -83,13 +83,13 @@ def insert_message(message_id, datova_schranka_id, sender, subject, content, att
         except Exception as e:
             print("❌ Chyba při vkládání zprávy:", e)
 
+# Načtení všech zpráv
 def get_messages():
-    """Načtení všech zpráv z databáze"""
     conn = connect_db()
     if conn:
         try:
             cursor = conn.cursor()
-            cursor.execute('''SELECT * FROM messages ORDER BY received_at DESC''')
+            cursor.execute('SELECT * FROM messages ORDER BY received_at DESC')
             messages = cursor.fetchall()
             cursor.close()
             conn.close()
@@ -98,40 +98,19 @@ def get_messages():
             print("❌ Chyba při načítání zpráv:", e)
             return []
 
-if __name__ == "__main__":
-    create_tables()
-    print("✅ Aplikace běží v režimu simulace API ISDS.")
-def insert_test_messages():
-    """Vloží fiktivní testovací zprávy do databáze"""
-    test_messages = [
-        ("msg001", "d75dvaq", "Ministerstvo vnitra", "Potvrzení o přijetí", "Vaše zpráva byla přijata.", None),
-        ("msg002", "vqqv5qf", "Finanční úřad", "Výzva k podání", "Nezapomeňte podat daňové přiznání.", None),
-        ("msg003", "jqwcu54", "Česká pošta", "Oznámení o zásilce", "Vaše zásilka je připravena k vyzvednutí.", None)
-    ]
-
-    for msg in test_messages:
-        insert_message(*msg)
-
-if __name__ == "__main__":
-    create_tables()
-    insert_test_messages()  # ✅ Přidá testovací zprávy
-    print("✅ Testovací zprávy byly přidány.")
-    print("✅ Aplikace běží v režimu simulace API ISDS.")
-from flask import Flask, jsonify
-from flask import Flask, request, jsonify
-
+# Flask aplikace
 app = Flask(__name__)
 
-@app.route('/messages', methods=['GET'])
+@app.route("/", methods=["GET"])
+def home():
+    return "✅ API běží správně!"
+
+@app.route("/messages", methods=["GET"])
 def get_all_messages():
     """API endpoint pro získání všech zpráv, s možností filtrování podle datové schránky"""
-
-    # Získání parametru z URL (např. /messages?datova_schranka_id=d75dvaq)
     schranka_id = request.args.get('datova_schranka_id')
+    messages = get_messages()
 
-    messages = get_messages()  # Načtení všech zpráv z DB
-
-    # Pokud je zadáno `datova_schranka_id`, filtrujeme zprávy
     if schranka_id:
         messages = [msg for msg in messages if msg[2] == schranka_id]
 
@@ -150,9 +129,21 @@ def get_all_messages():
     ]
 
     return jsonify(messages_list)
+
+# Vložení testovacích zpráv
+def insert_test_messages():
+    test_messages = [
+        ("msg001", "d75dvaq", "Ministerstvo vnitra", "Potvrzení o přijetí", "Vaše zpráva byla přijata.", None),
+        ("msg002", "vqqv5qf", "Finanční úřad", "Výzva k podání", "Nezapomeňte podat daňové přiznání.", None),
+        ("msg003", "jqwcu54", "Česká pošta", "Oznámení o zásilce", "Vaše zásilka je připravena k vyzvednutí.", None)
+    ]
+    for msg in test_messages:
+        insert_message(*msg)
+
+# Hlavní spuštění aplikace
 if __name__ == "__main__":
     create_tables()
     insert_test_messages()
     print("✅ Testovací zprávy byly přidány.")
     print("✅ Aplikace běží v režimu simulace API ISDS.")
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000)
